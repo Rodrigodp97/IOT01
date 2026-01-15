@@ -5,6 +5,10 @@ import serial.tools.list_ports
 import threading
 import time
 import platform
+import sys
+
+# Forzar salida inmediata de prints
+sys.stdout.flush()
 
 # ===================================================
 # ================ 1. LOGIC CODE ====================
@@ -166,7 +170,7 @@ def attach_events(ui):
         enviar_mensaje_arduino("MENU SECUENCIA")  # Enviar al Arduino
         ui["pages"].set_current_page(1)
         # Reiniciar la cámara si es necesario
-        if hasattr(ui["page_1"]["Webcam_4"], 'start'):
+        if hasattr(ui.get("page_1", {}).get("Webcam_4"), 'start'):
             ui["page_1"]["Webcam_4"].start()
     
     ui["page_0"]["Button_0"].on_click = start_sequence
@@ -175,6 +179,11 @@ def attach_events(ui):
     def abrir_configuracion(btn):
         enviar_mensaje_arduino("MENU CONFIGURACIONES")  # Enviar al Arduino
         ui["pages"].set_current_page(2)
+        # Esperar un momento para que lleguen los valores y actualizar UI
+        time.sleep(0.5)
+        ui["page_2"]["TextRetrasoValor"].text = str(retraso_deteccion)
+        ui["page_2"]["TextTiempoValor"].text = str(tiempo_medidas)
+        ui["page_2"]["TextDistanciaValor"].text = str(distancia_deteccion)
     
     ui["page_0"]["Button_1"].on_click = abrir_configuracion
     
@@ -193,15 +202,19 @@ def attach_events(ui):
         enviar_mensaje_arduino("MENU INICIO")
         ui["pages"].set_current_page(0)
     
-    ui["page_1"]["Icon_2"].on_click = volver_inicio
-    ui["page_2"]["Icon_1"].on_click = volver_inicio
+    if "page_1" in ui and "Icon_2" in ui["page_1"]:
+        ui["page_1"]["Icon_2"].on_click = volver_inicio
+    
+    if "page_2" in ui and "Icon_1" in ui["page_2"]:
+        ui["page_2"]["Icon_1"].on_click = volver_inicio
     
     # Icono de página 3 vuelve a página 0
     def volver_desde_prueba(icon):
         enviar_mensaje_arduino("MENU INICIO")
         ui["pages"].set_current_page(0)
     
-    ui["page_3"]["Icon_1"].on_click = volver_desde_prueba
+    if "page_3" in ui and "Icon_1" in ui["page_3"]:
+        ui["page_3"]["Icon_1"].on_click = volver_desde_prueba
     
     # Controles de retraso de detección (solo modifican variables locales)
     def incrementar_retraso(btn):
@@ -263,18 +276,47 @@ def attach_events(ui):
 
 
 def main():
+    print("=" * 50, flush=True)
+    print("INICIANDO APLICACIÓN PYVISUAL", flush=True)
+    print("=" * 50, flush=True)
+    
     # Conectar con Arduino al iniciar
+    print("\n[1] Buscando Arduino...", flush=True)
     if conectar_arduino():
         # Esperar a que Arduino se inicialice (reset al conectar serial)
+        print("[2] Esperando inicialización del Arduino...", flush=True)
         time.sleep(2)
+    else:
+        print("[!] ADVERTENCIA: No se pudo conectar con Arduino", flush=True)
     
+    print("[3] Creando interfaz gráfica...", flush=True)
     app = pv.PvApp()
-    ui = create_ui()
+    
+    try:
+        ui = create_ui()
+        print(f"    Páginas creadas: {list(ui.keys())}", flush=True)
+    except Exception as e:
+        print(f"    ✗ Error al crear UI: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        return
+    
     attach_events(ui)
     
     # Iniciar hilo de lectura serial desde el inicio
+    print("[4] Iniciando lectura del puerto serial...", flush=True)
     iniciar_lectura_sensor(ui)
     
+    # Solicitar configuración inicial del Arduino
+    if arduino_port and arduino_port.is_open:
+        print("[5] Solicitando configuración inicial...", flush=True)
+        time.sleep(0.5)  # Dar tiempo al hilo de lectura para iniciarse
+        enviar_mensaje_arduino("MENU CONFIGURACIONES")
+        time.sleep(1)  # Esperar a que lleguen los valores
+        print(f"[6] Valores recibidos - Retraso: {retraso_deteccion}, Tiempo: {tiempo_medidas}, Distancia: {distancia_deteccion}", flush=True)
+    
+    print("[7] Mostrando ventana...", flush=True)
+    print("=" * 50, flush=True)
     ui["window"].show()
     app.run()
     
