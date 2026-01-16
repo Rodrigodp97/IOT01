@@ -24,7 +24,8 @@
 #define FALSE 0
 #define TRUE 1
 
-#define TRAZAS
+// Comentado para evitar interferencia con comunicación Python
+//#define TRAZAS
 
 // Se definen los pines de entradas y salidas que se van a usar
 int botonArriba = 0;
@@ -76,6 +77,10 @@ int contadorArbolNODetectado = 0;
 int maxContador = 15;
 int contadorDetectadoPrueba = 0;
 
+// Variable para comandos seriales
+String comandoSerial = "";
+bool enviarDatosSensor = false;  // Controla cuándo enviar datos del sensor por serial
+
 // Caracteristicas Electrovalvula
 float CaudalElecValvula = 2; // En litros/segundos
 //2 l/seg para la electrovalvula 40 Bar M-2010 SIRFRAN
@@ -95,7 +100,7 @@ int addr_periodoMedidas = sizeof(tiempoRetrasoDeteccion);
 int addr_distanciaDeteccion = addr_periodoMedidas + sizeof(periodoMedidas);
 
 //Se define el nombre version
-String version = "A00";
+String version = "bA01";
 
 //Se definen columnas y filas de la pantalla LCD
 #define COLS 16
@@ -129,7 +134,7 @@ void setup(){
 
   Serial.begin(9600);
   leerEEPROM();
-  inicioConfiguraciones();
+  // inicioConfiguraciones(); // Comentado para no sobreescribir valores de EEPROM
 }
 
 // Cabeceras funciones utilizadas
@@ -140,14 +145,30 @@ void encenderRELE(void);
 void apagarRELE(void);
 void Toggleflg(void);
 float contadorLitrosFumigar(unsigned long tiempoEncendido);
+void procesarComandoSerial(String comando);
 
 void loop(){
 
-  LecturaBotonAbajo = leerEntradaAnalogica(botonAbajo);
-  LecturaBotonArriba = leerEntradaAnalogica(botonArriba);
-  LecturaBotonOK = leerEntradaAnalogica(botonOK);
-  LecturaBotonESC = leerEntradaAnalogica(botonESC);
-  LecturaBotonManual = leerEntradaAnalogica(botonManual);
+  // Procesar comandos seriales de Python
+  if (Serial.available() > 0) {
+    comandoSerial = Serial.readStringUntil('\n');
+    comandoSerial.trim(); // Eliminar espacios y saltos de línea
+    procesarComandoSerial(comandoSerial);
+  }
+
+  // Desactivar lectura de botones físicos temporalmente
+  // LecturaBotonAbajo = leerEntradaAnalogica(botonAbajo);
+  // LecturaBotonArriba = leerEntradaAnalogica(botonArriba);
+  // LecturaBotonOK = leerEntradaAnalogica(botonOK);
+  // LecturaBotonESC = leerEntradaAnalogica(botonESC);
+  // LecturaBotonManual = leerEntradaAnalogica(botonManual);
+  
+  // Poner todas las lecturas en TRUE (no presionado)
+  LecturaBotonAbajo = TRUE;
+  LecturaBotonArriba = TRUE;
+  LecturaBotonOK = TRUE;
+  LecturaBotonESC = TRUE;
+  LecturaBotonManual = TRUE;
   
   delay(10);
   
@@ -472,15 +493,6 @@ void loop(){
     
       long cm;
       cm = ping(trigg, echo);
-#ifdef TRAZAS    
-      /*Serial.print("Distancia: ");
-      Serial.print(cm);
-      Serial.println("cm"); 
-
-      Serial.print("Umbral deteccion: ");
-      Serial.print(distanciaDeteccion);
-      Serial.println("cm");*/
-#endif
 
       switch(estadoModoAut){
         case Desconocido:
@@ -499,16 +511,7 @@ void loop(){
             cntArbolesDia++;
 
             contadorArbolDetectado=0;
-            contadorArbolNODetectado=0;
-#ifdef TRAZAS   
-            Serial.println(" Estado ArbolDetectado");
-            Serial.println(" ARBOL DETECTADO!!");
-            Serial.print("Distancia: ");
-            Serial.print(cm);
-            Serial.println("cm"); 
-            Serial.print(" Arboles contados:");
-            Serial.print(cntArbolesDia);
-#endif            
+            contadorArbolNODetectado=0;         
           }
           break;
 
@@ -518,30 +521,12 @@ void loop(){
           }
 
           if(contadorArbolNODetectado>=maxContador){
-            estadoModoAut = ArbolDejadoDetectar;            
-#ifdef TRAZAS   
-          Serial.println(" Estado ArbolDejadoDetectar");
-          Serial.println(" Arbol DEJADO de detectar!");
-          Serial.print("Distancia: ");
-          Serial.print(cm);
-          Serial.println("cm"); 
-#endif          
+            estadoModoAut = ArbolDejadoDetectar;                    
           // Apagar el Rele
           apagarRELE();
           apagarLED();
           // Calcular el tiempo que estuvo encendido
-          tiempoEncendido += millis() - tiempoInicio;
-#ifdef TRAZAS 
-          // Imprimir el tiempo total encendido en la consola serie
-          Serial.print("Tiempo total encendido: ");
-          Serial.print(tiempoEncendido / 1000.0); // Convertir a segundos
-          Serial.println(" segundos");
-
-          litrosUsoTotal = contadorLitrosFumigar(tiempoEncendido);
-          Serial.print("Litros fumigados: ");
-          Serial.print(litrosUsoTotal);
-          Serial.println(" litros");
-#endif         
+          tiempoEncendido += millis() - tiempoInicio;        
             contadorArbolDetectado=0;
             contadorArbolNODetectado=0;    
           }
@@ -549,65 +534,8 @@ void loop(){
 
         case ArbolDejadoDetectar:
           estadoModoAut = Desconocido;            
-#ifdef TRAZAS   
-          Serial.println(" Estado DESCONOCIDO\n");
-#endif  
           break;
       }
-/*
-      if(cm < distanciaDeteccion){
-        contadorArbolDetectado++;
-        contadorArbolNODetectado=0;
-      }else{
-        contadorArbolDetectado=0;
-        contadorArbolNODetectado++;
-      }
-*/
-/*
-      if(cm < distanciaDeteccion){
-        if (!ReleEncendido) {
-          delay(tiempoRetrasoDeteccion);
-          // Encender el Rele
-          encenderRELE();
-          encenderLED();
-          // Guardar el tiempo de inicio
-          tiempoInicio = millis();
-          // Cambiar el estado del Rele a encendido
-          ReleEncendido = true;
-          cntArbolesDia++;
-#ifdef TRAZAS   
-          Serial.print(" ARBOL DETECTADO!!");
-          Serial.print("Distancia: ");
-          Serial.print(cm);
-          Serial.println("cm"); 
-          Serial.print(" Arboles contados:");
-          Serial.print(cntArbolesDia);
-#endif
-        }
-      }else{
-        if (ReleEncendido) {
-#ifdef TRAZAS   
-          Serial.print(" Arbol DEJADO de detectar!");
-          Serial.print("Distancia: ");
-          Serial.print(cm);
-          Serial.println("cm"); 
-#endif          
-          // Apagar el Rele
-          apagarRELE();
-          apagarLED();
-          // Calcular el tiempo que estuvo encendido
-          tiempoEncendido += millis() - tiempoInicio;
-          // Cambiar el estado del Rele a apagado
-          ReleEncendido = false;
-#ifdef TRAZAS 
-          // Imprimir el tiempo total encendido en la consola serie
-          Serial.print("Tiempo total encendido: ");
-          Serial.print(tiempoEncendido / 1000.0); // Convertir a segundos
-          Serial.println(" segundos");
-#endif 
-        }
-      }
-*/      
   }else{
     lcd.setCursor(0,0);
     lcd.print("Modo Funcionam");
@@ -651,12 +579,6 @@ void loop(){
         tiempoEncendido += millis() - tiempoInicio;
         // Cambiar el estado del LED a apagado
         ReleEncendido = false;
-#ifdef TRAZAS
-        // Imprimir el tiempo total encendido en la consola serie
-        Serial.print("Tiempo total encendido: ");
-        Serial.print(tiempoEncendido / 1000.0); // Convertir a segundos
-        Serial.println(" segundos");
-#endif
       }
     }
 
@@ -676,11 +598,10 @@ void loop(){
     long distancia;
   
     distancia=ping(trigg,echo);
-#ifdef TRAZAS    
-    Serial.print("Distancia: ");
-    Serial.print(distancia);
-    Serial.println("cm");   
-#endif
+    
+    // Enviar valor del sensor vía serial solo si estamos en modo prueba
+    Serial.println(distancia);
+
     lcd.setCursor(0,1);
     lcd.print("                ");
 
@@ -703,6 +624,7 @@ void loop(){
       cursor = 1;
       lcd.clear();
     }
+    delay(tiempoRetrasoDeteccion);
   
     break;
   
@@ -803,7 +725,7 @@ long ping(int TriggerPin, int EchoPin) {
   delayMicroseconds(10);
   digitalWrite(TriggerPin, LOW);
   
-  duration = pulseIn(EchoPin, HIGH);  //medimos el tiempo entre pulsos, en microsegundos
+  duration = pulseIn(EchoPin, HIGH, 30000);  //timeout de 30ms para evitar bloqueos
   
   distanceCm = duration * 10 / 292/ 2;   //convertimos a distancia, en cm
 
@@ -865,5 +787,62 @@ void Toggleflg(void){
     flgSecPausado = FALSE;
   }else{
     flgSecPausado = TRUE;
+  }
+}
+
+void procesarComandoSerial(String comando) {
+  // Procesar comandos desde la interfaz Python
+  if (comando == "MENU INICIO") {
+    estado = MenuPrincipal;
+    cursor = 1;
+    lcd.clear();
+    Serial.println("ESTADO:INICIO");
+  }
+  else if (comando == "MENU CONFIGURACIONES") {
+    enviarDatosSensor = false;  // Desactivar envío de datos
+    estado = ModoConfiguracion;
+    lcd.clear();
+    // Enviar confirmación y valores actuales
+    Serial.println("ESTADO:CONFIGURACION");
+    Serial.print("RETRASO:");
+    Serial.println(tiempoRetrasoDeteccion);
+    Serial.print("TIEMPO:");
+    Serial.println(periodoMedidas);
+    Serial.print("DISTANCIA:");
+    Serial.println(distanciaDeteccion);
+  }
+  else if (comando == "MENU SECUENCIA") {
+    enviarDatosSensor = false;  // Desactivar envío de datos
+    estado = ModoFuncionamiento;
+    lcd.clear();
+    Serial.println("ESTADO:FUNCIONAMIENTO");
+  }
+  else if (comando == "MENU PRUEBA SENSOR") {
+    estado = PruebaSensor;
+    lcd.clear();
+    Serial.println("ESTADO:PRUEBA_SENSOR");
+    enviarDatosSensor = true;  // Activar envío de datos del sensor
+  }
+  // Comandos para recibir valores de configuración desde Python
+  else if (comando.startsWith("CONFIG_RETRASO:")) {
+    int valor = comando.substring(15).toInt();
+    tiempoRetrasoDeteccion = valor;
+    EEPROM.put(addr_tiempoRetrasoDeteccion, tiempoRetrasoDeteccion);
+    Serial.print("RETRASO:");
+    Serial.println(tiempoRetrasoDeteccion);
+  }
+  else if (comando.startsWith("CONFIG_TIEMPO:")) {
+    int valor = comando.substring(14).toInt();
+    periodoMedidas = valor;
+    EEPROM.put(addr_periodoMedidas, periodoMedidas);
+    Serial.print("TIEMPO:");
+    Serial.println(periodoMedidas);
+  }
+  else if (comando.startsWith("CONFIG_DISTANCIA:")) {
+    int valor = comando.substring(17).toInt();
+    distanciaDeteccion = valor;
+    EEPROM.put(addr_distanciaDeteccion, distanciaDeteccion);
+    Serial.print("DISTANCIA:");
+    Serial.println(distanciaDeteccion);
   }
 }
