@@ -1,6 +1,7 @@
 //Librerias incluidas
 #include "LiquidCrystal.h"
 #include <EEPROM.h>
+#include <SoftwareSerial.h>
 
 //Definimos los estados de la maquina de estados
 #define MenuPrincipal 0
@@ -27,6 +28,9 @@
 // Comentado para evitar interferencia con comunicación Python
 //#define TRAZAS
 
+// Activar simulación GPS para pruebas en interiores (descomentar siguiente línea)
+#define SIMULACION_GPS
+
 // Se definen los pines de entradas y salidas que se van a usar
 int botonArriba = 0;
 int botonAbajo = 1;
@@ -43,6 +47,10 @@ int d4 = 5;
 int d5 = 4;
 int d6 = 3;
 int d7 = 2;
+
+// Pines para módulo GPS
+int GPS_RX = 10;  // TX del GPS conectado a pin 10 del Arduino
+int GPS_TX = 13;  // RX del GPS conectado a pin 13 del Arduino
 
 //Se definen variables guardan las lecturas botones
 bool LecturaBotonArriba = FALSE;
@@ -80,6 +88,24 @@ int contadorDetectadoPrueba = 0;
 // Variable para comandos seriales
 String comandoSerial = "";
 bool enviarDatosSensor = false;  // Controla cuándo enviar datos del sensor por serial
+bool enviarGPSContinuo = false;  // Controla envío GPS en modo Mapas
+
+// Variables para GPS
+SoftwareSerial gpsSerial(GPS_RX, GPS_TX);  // RX, TX
+unsigned long ultimoEnvioGPS = 0;
+const unsigned long intervaloGPS = 1000;  // Enviar GPS cada 1 segundo (1000 ms)
+String latitud = "0.0";
+String longitud = "0.0";
+bool gpsValido = false;
+
+#ifdef SIMULACION_GPS
+// Coordenadas base para simulación (Villarrobledo, España)
+float latSimulada = 38.63544142763858;
+float lonSimulada = -2.9154411698539064;
+float offsetLat = 0.0;
+float offsetLon = 0.0;
+int contadorSimulacion = 0;
+#endif
 
 // Caracteristicas Electrovalvula
 float CaudalElecValvula = 2; // En litros/segundos
@@ -121,7 +147,7 @@ void setup(){
   pinMode(botonAbajo, INPUT);
   pinMode(botonOK, INPUT);
   pinMode(botonESC, INPUT);
-  pinMode(botonManual, INPUT);
+  pinMode(botonManual, INPUT_PULLUP);  // Pull-up para evitar pin flotante
   
   pinMode(Rele, OUTPUT);
   pinMode(LED, OUTPUT);
@@ -133,6 +159,7 @@ void setup(){
   lcd.clear();
 
   Serial.begin(9600);
+  gpsSerial.begin(9600);  // Inicializar comunicación con módulo GPS
   leerEEPROM();
   // inicioConfiguraciones(); // Comentado para no sobreescribir valores de EEPROM
 }
@@ -145,9 +172,15 @@ void encenderRELE(void);
 void apagarRELE(void);
 void Toggleflg(void);
 float contadorLitrosFumigar(unsigned long tiempoEncendido);
+void limpiarEstadoRele(void);
 void procesarComandoSerial(String comando);
+void leerDatosGPS(void);
+void enviarUbicacionGPS(void);
 
 void loop(){
+
+  // Leer datos del GPS continuamente
+  leerDatosGPS();
 
   // Procesar comandos seriales de Python
   if (Serial.available() > 0) {
@@ -155,20 +188,25 @@ void loop(){
     comandoSerial.trim(); // Eliminar espacios y saltos de línea
     procesarComandoSerial(comandoSerial);
   }
+  
+  // Enviar GPS continuamente si está activado (modo Mapas)
+  if (enviarGPSContinuo == true) {
+    enviarUbicacionGPS();
+  }
 
   // Desactivar lectura de botones físicos temporalmente
   // LecturaBotonAbajo = leerEntradaAnalogica(botonAbajo);
   // LecturaBotonArriba = leerEntradaAnalogica(botonArriba);
   // LecturaBotonOK = leerEntradaAnalogica(botonOK);
   // LecturaBotonESC = leerEntradaAnalogica(botonESC);
-  // LecturaBotonManual = leerEntradaAnalogica(botonManual);
+  LecturaBotonManual = leerEntradaAnalogica(botonManual);
   
   // Poner todas las lecturas en TRUE (no presionado)
   LecturaBotonAbajo = TRUE;
   LecturaBotonArriba = TRUE;
   LecturaBotonOK = TRUE;
   LecturaBotonESC = TRUE;
-  LecturaBotonManual = TRUE;
+  //LecturaBotonManual = TRUE;
   
   delay(10);
   
@@ -346,6 +384,10 @@ void loop(){
       }
       if ((LecturaBotonOK == FALSE) && (auxBotonOK == TRUE)){
         estado = FuncionamientoAut;
+        estadoModoAut = Desconocido;  // Inicializar estado al entrar
+        contadorArbolDetectado = 0;
+        contadorArbolNODetectado = 0;
+        flgSecPausado = FALSE;  // Asegurar que no esté pausado al entrar
         lcd.clear();
       }
     }else if(cursor==2){
@@ -482,8 +524,36 @@ void loop(){
     break;
 
   case FuncionamientoAut:
+    // Enviar ubicación GPS solo cuando el relé está encendido (fumigando)
+    if (ReleEncendido == TRUE) {
+      enviarUbicacionGPS();
+    }
+    
+#ifdef SIMULACION_GPS
+    // En modo simulación, mantener relé siempre encendido para pruebas
+    if (!ReleEncendido) {
+      encenderRELE();
+      encenderLED();
+      tiempoInicio = millis();
+      ReleEncendido = true;
+    }
+#endif
+    
     if ((LecturaBotonOK == FALSE) && (auxBotonOK == TRUE)){
+      // Si vamos a pausar y el relé está encendido, contabilizar el tiempo
+      if(flgSecPausado == FALSE && ReleEncendido == TRUE){
+        tiempoEncendido += millis() - tiempoInicio;
+      }
       Toggleflg();
+      // Si pausamos, apagar el relé y resetear el estado
+      if(flgSecPausado == TRUE){
+        apagarRELE();
+        ReleEncendido = FALSE;
+        apagarLED();
+        estadoModoAut = Desconocido;  // Resetear estado para empezar limpio al despausar
+        contadorArbolDetectado = 0;
+        contadorArbolNODetectado = 0;
+      }
     }
     if(flgSecPausado == FALSE){
       lcd.setCursor(0,0);
@@ -508,6 +578,7 @@ void loop(){
             encenderLED();
             // Guardar el tiempo de inicio
             tiempoInicio = millis();
+            ReleEncendido = TRUE;  // Marcar relé como encendido
             cntArbolesDia++;
 
             contadorArbolDetectado=0;
@@ -526,7 +597,8 @@ void loop(){
           apagarRELE();
           apagarLED();
           // Calcular el tiempo que estuvo encendido
-          tiempoEncendido += millis() - tiempoInicio;        
+          tiempoEncendido += millis() - tiempoInicio;
+          ReleEncendido = FALSE;  // Marcar relé como apagado
             contadorArbolDetectado=0;
             contadorArbolNODetectado=0;    
           }
@@ -540,17 +612,13 @@ void loop(){
     lcd.setCursor(0,0);
     lcd.print("Modo Funcionam");
     lcd.setCursor(0,1);
-    lcd.print("PAUSADO");  
-    apagarRELE();
-    ReleEncendido = FALSE;
-    apagarLED();
+    lcd.print("PAUSADO");
+    // El relé ya está apagado desde el momento de pausar
   }
 
     if ((LecturaBotonESC == FALSE) && (auxBotonESC == TRUE)){
+      limpiarEstadoRele();  // Usar función para consistencia
       estado = ModoFuncionamiento;
-      apagarRELE();
-      ReleEncendido = FALSE;
-      apagarLED();
       lcd.clear();
     }
     break;
@@ -572,7 +640,7 @@ void loop(){
       }      
     }else{
       if (ReleEncendido) {
-        // Encender el Rele
+        // Apagar el Rele
         apagarRELE();
         apagarLED();
         // Calcular el tiempo que estuvo encendido en esta pulsación
@@ -583,10 +651,8 @@ void loop(){
     }
 
     if ((LecturaBotonESC == FALSE) && (auxBotonESC == TRUE)){
+      limpiarEstadoRele();  // Usar función para consistencia
       estado = ModoFuncionamiento;
-      apagarRELE();
-      ReleEncendido = FALSE;
-      apagarLED();
       lcd.clear();
     }
     break;
@@ -753,10 +819,12 @@ void apagarLED(void){
 
 void encenderRELE(void){
   digitalWrite(Rele, HIGH);
+  Serial.println("RELE:ON");  // Enviar estado a Python
 }
 
 void apagarRELE(void){
   digitalWrite(Rele, LOW);
+  Serial.println("RELE:OFF");  // Enviar estado a Python
 }
 
 float contadorLitrosFumigar(unsigned long tiempoEncendido){
@@ -790,16 +858,41 @@ void Toggleflg(void){
   }
 }
 
+void limpiarEstadoRele(void){
+  // Si el relé está encendido, contabilizar el tiempo antes de apagarlo
+  if(ReleEncendido == TRUE){
+    tiempoEncendido += millis() - tiempoInicio;
+  }
+  // Apagar relé y LED
+  apagarRELE();
+  apagarLED();
+  ReleEncendido = FALSE;
+  // Resetear estados del modo automático
+  estadoModoAut = Desconocido;
+  contadorArbolDetectado = 0;
+  contadorArbolNODetectado = 0;
+  flgSecPausado = FALSE;
+}
+
 void procesarComandoSerial(String comando) {
   // Procesar comandos desde la interfaz Python
   if (comando == "MENU INICIO") {
+    limpiarEstadoRele();  // Limpiar estado antes de cambiar de menú
+    enviarGPSContinuo = false;  // Desactivar GPS continuo
     estado = MenuPrincipal;
     cursor = 1;
     lcd.clear();
     Serial.println("ESTADO:INICIO");
   }
+  else if (comando == "GET_VERSION") {
+    // Enviar versión del firmware
+    Serial.print("FW:");
+    Serial.println(version);
+  }
   else if (comando == "MENU CONFIGURACIONES") {
+    limpiarEstadoRele();  // Limpiar estado antes de cambiar de menú
     enviarDatosSensor = false;  // Desactivar envío de datos
+    enviarGPSContinuo = false;  // Desactivar GPS continuo
     estado = ModoConfiguracion;
     lcd.clear();
     // Enviar confirmación y valores actuales
@@ -812,16 +905,72 @@ void procesarComandoSerial(String comando) {
     Serial.println(distanciaDeteccion);
   }
   else if (comando == "MENU SECUENCIA") {
+    limpiarEstadoRele();  // Limpiar estado antes de cambiar de menú
     enviarDatosSensor = false;  // Desactivar envío de datos
+    enviarGPSContinuo = false;  // Desactivar GPS continuo
     estado = ModoFuncionamiento;
     lcd.clear();
     Serial.println("ESTADO:FUNCIONAMIENTO");
   }
+  else if (comando == "START_GPS") {
+    // Activar envío continuo de GPS (para modo Mapas)
+    enviarGPSContinuo = true;
+    Serial.println("ESTADO:GPS_ACTIVO");
+  }
+  else if (comando == "STOP_GPS") {
+    // Desactivar envío continuo de GPS
+    enviarGPSContinuo = false;
+    Serial.println("ESTADO:GPS_INACTIVO");
+  }
+  else if (comando == "MODO AUTOMATICO") {
+    limpiarEstadoRele();  // Limpiar estado antes de entrar al modo
+    enviarGPSContinuo = false;  // Desactivar GPS continuo al entrar a modo automático
+    estado = FuncionamientoAut;
+    estadoModoAut = Desconocido;
+    contadorArbolDetectado = 0;
+    contadorArbolNODetectado = 0;
+    flgSecPausado = FALSE;
+    lcd.clear();
+    Serial.println("ESTADO:MODO_AUTOMATICO");
+  }
+  else if (comando == "MODO MANUAL") {
+    limpiarEstadoRele();  // Limpiar estado antes de entrar al modo
+    enviarGPSContinuo = false;  // Desactivar GPS continuo
+    estado = FuncionamientoMan;
+    lcd.clear();
+    Serial.println("ESTADO:MODO_MANUAL");
+  }
+  else if (comando == "PAUSAR") {
+    // Toggle del flag de pausa (solo en modo automático)
+    if (estado == FuncionamientoAut) {
+      Toggleflg();
+      if (flgSecPausado == TRUE) {
+        Serial.println("ESTADO:PAUSADO");
+      } else {
+        Serial.println("ESTADO:REANUDADO");
+      }
+    }
+  }
   else if (comando == "MENU PRUEBA SENSOR") {
+    limpiarEstadoRele();  // Limpiar estado antes de cambiar de menú
     estado = PruebaSensor;
+    contadorDetectadoPrueba = 0;
     lcd.clear();
     Serial.println("ESTADO:PRUEBA_SENSOR");
     enviarDatosSensor = true;  // Activar envío de datos del sensor
+  }
+  else if (comando == "MENU RESULTADOS USO") {
+    limpiarEstadoRele();  // Limpiar estado antes de cambiar de menú
+    estado = ResultadosUso;
+    cursor = 1;
+    lcd.clear();
+    // Calcular y enviar los resultados
+    Serial.println("ESTADO:RESULTADOS_USO");
+    Serial.print("ARBOLES:");
+    Serial.println(cntArbolesDia);
+    litrosUsoTotal = contadorLitrosFumigar(tiempoEncendido);
+    Serial.print("LITROS:");
+    Serial.println(litrosUsoTotal);
   }
   // Comandos para recibir valores de configuración desde Python
   else if (comando.startsWith("CONFIG_RETRASO:")) {
@@ -844,5 +993,116 @@ void procesarComandoSerial(String comando) {
     EEPROM.put(addr_distanciaDeteccion, distanciaDeteccion);
     Serial.print("DISTANCIA:");
     Serial.println(distanciaDeteccion);
+  }
+}
+
+// Función para leer datos del módulo GPS
+void leerDatosGPS(void) {
+#ifdef SIMULACION_GPS
+  // Modo simulación: generar coordenadas en un área muy pequeña
+  // Simular movimiento suave y realista (~2 m/s, velocidad típica de fumigación)
+  contadorSimulacion++;
+  
+  // Incremento muy pequeño para simular movimiento en área reducida
+  // 0.00001 grados ≈ 1.1 metros (aproximadamente)
+  // Movimiento lento: ~1 metro por segundo
+  offsetLat += 0.000008;  // ~0.9 metros hacia el norte por segundo
+  offsetLon += 0.000006;  // ~0.7 metros hacia el este por segundo
+  // Resultado diagonal: ~1.1 metros por segundo
+  
+  // Cada 15 segundos, cambiar ligeramente la dirección (simular curvas suaves)
+  if (contadorSimulacion % 15 == 0) {
+    // Cambio muy suave de dirección para simular giros graduales
+    unsigned long seed = millis();
+    float cambioLat = ((seed % 10) - 5) * 0.000001;  // Cambio mínimo
+    float cambioLon = ((seed % 10) - 5) * 0.000001;
+    
+    offsetLat += cambioLat;
+    offsetLon += cambioLon;
+  }
+  
+  // Limitar el área de movimiento a ±0.0005 grados (~50 metros desde el origen)
+  if (offsetLat > 0.0005) offsetLat = 0.0;  // Reiniciar al centro
+  if (offsetLat < -0.0005) offsetLat = 0.0;
+  if (offsetLon > 0.0005) offsetLon = 0.0;
+  if (offsetLon < -0.0005) offsetLon = 0.0;
+  
+  // Actualizar coordenadas simuladas
+  latitud = String(latSimulada + offsetLat, 6);
+  longitud = String(lonSimulada + offsetLon, 6);
+  gpsValido = true;  // Siempre válido en modo simulación
+  
+#else
+  // Modo real: leer datos del módulo GPS
+  while (gpsSerial.available() > 0) {
+    String nmea = gpsSerial.readStringUntil('\n');
+    nmea.trim();
+    
+    // Buscar sentencia GPGGA o GNGGA que contiene latitud y longitud
+    if (nmea.startsWith("$GPGGA") || nmea.startsWith("$GNGGA")) {
+      // Parsear la sentencia NMEA
+      // Formato: $GPGGA,hhmmss.ss,llll.ll,a,yyyyy.yy,a,x,xx,x.x,x.x,M,x.x,M,x.x,xxxx*hh
+      int coma1 = nmea.indexOf(',');
+      int coma2 = nmea.indexOf(',', coma1 + 1);
+      int coma3 = nmea.indexOf(',', coma2 + 1);
+      int coma4 = nmea.indexOf(',', coma3 + 1);
+      int coma5 = nmea.indexOf(',', coma4 + 1);
+      int coma6 = nmea.indexOf(',', coma5 + 1);
+      
+      if (coma6 != -1) {
+        String lat = nmea.substring(coma2 + 1, coma3);
+        String latDir = nmea.substring(coma3 + 1, coma4);
+        String lon = nmea.substring(coma4 + 1, coma5);
+        String lonDir = nmea.substring(coma5 + 1, coma6);
+        String fixQuality = nmea.substring(coma6 + 1, nmea.indexOf(',', coma6 + 1));
+        
+        // Verificar si hay fix GPS válido (fixQuality > 0)
+        if (fixQuality.toInt() > 0 && lat.length() > 0 && lon.length() > 0) {
+          // Convertir formato NMEA a grados decimales
+          // Latitud: ddmm.mmmm -> dd.dddddd
+          if (lat.length() >= 4) {
+            float latGrados = lat.substring(0, 2).toFloat();
+            float latMinutos = lat.substring(2).toFloat();
+            float latDecimal = latGrados + (latMinutos / 60.0);
+            if (latDir == "S") latDecimal = -latDecimal;
+            latitud = String(latDecimal, 6);
+          }
+          
+          // Longitud: dddmm.mmmm -> ddd.dddddd
+          if (lon.length() >= 5) {
+            float lonGrados = lon.substring(0, 3).toFloat();
+            float lonMinutos = lon.substring(3).toFloat();
+            float lonDecimal = lonGrados + (lonMinutos / 60.0);
+            if (lonDir == "W") lonDecimal = -lonDecimal;
+            longitud = String(lonDecimal, 6);
+          }
+          
+          gpsValido = true;
+        } else {
+          gpsValido = false;
+        }
+      }
+    }
+  }
+#endif
+}
+
+// Función para enviar ubicación GPS cada segundo
+void enviarUbicacionGPS(void) {
+  unsigned long tiempoActual = millis();
+  
+  // Verificar si ha pasado 1 segundo desde el último envío
+  if (tiempoActual - ultimoEnvioGPS >= intervaloGPS) {
+    ultimoEnvioGPS = tiempoActual;
+    
+    // Enviar datos GPS por serial
+    if (gpsValido) {
+      Serial.print("GPS:");
+      Serial.print(latitud);
+      Serial.print(",");
+      Serial.println(longitud);
+    } else {
+      Serial.println("GPS:NO_FIX");
+    }
   }
 }
