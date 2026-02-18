@@ -3,6 +3,9 @@ from ui.ui_page_0 import create_page_0_ui
 from ui.ui_page_1 import create_page_1_ui
 from ui.ui_page_2 import create_page_2_ui
 from ui.ui_page_3 import create_page_3_ui
+from ui.ui_page_4 import create_page_4_ui
+from ui.ui_page_5 import create_page_5_ui
+from ui.ui_page_6 import create_page_6_ui
 
 
 def create_window():
@@ -31,16 +34,22 @@ def create_pages(window):
     page_1 = pages.create_page("page_1",   bg_color=(255, 255, 255, 1),  bg_image=None)
     page_2 = pages.create_page("page_2",   bg_color=(255, 255, 255, 1),  bg_image=None)
     page_3 = pages.create_page("page_3",   bg_color=(255, 255, 255, 1),  bg_image=None)
-    return pages, page_0, page_1, page_2, page_3
+    page_4 = pages.create_page("page_4",   bg_color=(255, 255, 255, 1),  bg_image=None)
+    page_5 = pages.create_page("page_5",   bg_color=(255, 255, 255, 1),  bg_image=None)
+    page_6 = pages.create_page("page_6",   bg_color=(255, 255, 255, 1),  bg_image=None)
+    return pages, page_0, page_1, page_2, page_3, page_4, page_5, page_6
 
 
 def create_ui():
     window = create_window()
-    pages, page_0, page_1, page_2, page_3 = create_pages(window)
+    pages, page_0, page_1, page_2, page_3, page_4, page_5, page_6 = create_pages(window)
     page_0_widget = pages.widget(page_0)
     page_1_widget = pages.widget(page_1)
     page_2_widget = pages.widget(page_2)
     page_3_widget = pages.widget(page_3)
+    page_4_widget = pages.widget(page_4)
+    page_5_widget = pages.widget(page_5)
+    page_6_widget = pages.widget(page_6)
     ui = {
         "window": window,
         "pages": pages
@@ -49,12 +58,18 @@ def create_ui():
     ui_page_1 = create_page_1_ui(page_1_widget, ui)
     ui_page_2 = create_page_2_ui(page_2_widget, ui)
     ui_page_3 = create_page_3_ui(page_3_widget, ui)
+    ui_page_4 = create_page_4_ui(page_4_widget, ui)
+    ui_page_5 = create_page_5_ui(page_5_widget, ui)
+    ui_page_6 = create_page_6_ui(page_6_widget, ui)
 
     ui.update({
         "page_0": ui_page_0,
         "page_1": ui_page_1,
         "page_2": ui_page_2,
-        "page_3": ui_page_3
+        "page_3": ui_page_3,
+        "page_4": ui_page_4,
+        "page_5": ui_page_5,
+        "page_6": ui_page_6
     })
 
     return ui
