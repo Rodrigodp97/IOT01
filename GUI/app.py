@@ -396,6 +396,46 @@ def detener_lectura_sensor():
     lectura_activa = False
     print("Lectura de sensor detenida")
 
+def configurar_webcam_ajuste(ui):
+    """
+    Evita que el widget de webcam cambie su geometria y estira la imagen
+    para rellenar el area fija del widget.
+    """
+    cam = ui.get("page_1", {}).get("Webcam_4")
+    if not cam:
+        return
+
+    # Importes locales para evitar dependencia global.
+    import types
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QTransform
+
+    def _configure_style_fill(self):
+        if self._pixmap is None or self._pixmap.isNull():
+            return
+
+        transform = QTransform()
+        if self._flip_h:
+            transform.scale(-1, 1)
+        if self._flip_v:
+            transform.scale(1, -1)
+        transform.rotate(self._rotate)
+
+        transformed = self._pixmap.transformed(transform, Qt.SmoothTransformation)
+        final_width = int(self._target_width * self._scale)
+        final_height = int(self._target_height * self._scale)
+
+        # Estirar para llenar el area del widget sin cambiar su geometria.
+        self._pixmap = transformed.scaled(
+            final_width,
+            final_height,
+            Qt.IgnoreAspectRatio,
+            Qt.SmoothTransformation
+        )
+
+    cam.configure_style = types.MethodType(_configure_style_fill, cam)
+    cam.setFixedSize(800, 450)
+
 # ===================================================
 # ============== 2. EVENT BINDINGS ==================
 # ===================================================
@@ -545,6 +585,7 @@ def attach_events(ui):
     # Botón atrás de página 1 (modo funcionamiento) muestra trayectoria GPS
     def volver_desde_funcionamiento(icon):
         mostrar_trayectoria_gps()  # Mostrar trayectoria antes de salir
+
         
         # Resetear estado visual de los botones
         if modo_activo["automatico"]:
@@ -812,6 +853,8 @@ def main():
         import traceback
         traceback.print_exc()
         return
+
+    configurar_webcam_ajuste(ui)
     
     attach_events(ui)
     
