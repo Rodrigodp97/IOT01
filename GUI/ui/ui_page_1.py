@@ -8,8 +8,8 @@ def create_page_1_ui(window,ui):
     :return: Dictionary of UI elements.
     """
     ui_page = {}
-    ui_page["Button_0"] = pv.PvButton(container=window, x=365, y=13, width=292,
-        height=75, text='SECUENCIA', font='assets/fonts/Lexend/Lexend.ttf', font_size=23,
+    ui_page["Button_0"] = pv.PvButton(container=window, x=392, y=10, width=240,
+        height=55, text='SECUENCIA', font='assets/fonts/Lexend/Lexend.ttf', font_size=20,
         font_color=(0, 0, 0, 1), font_color_hover=None, bold=False, italic=False,
         underline=False, strikethrough=False, idle_color=(255, 255, 255, 1), hover_color=None,
         clicked_color=None, border_color=(0, 0, 0, 1), border_hover_color=None, border_thickness=1,
@@ -19,8 +19,8 @@ def create_page_1_ui(window,ui):
         is_disabled=False, opacity=1, on_hover=None, on_click=None,
         on_release=None, tag=None)
 
-    ui_page["Button_1"] = pv.PvButton(container=window, x=554, y=505, width=292,
-        height=75, text='MANUAL', font='assets/fonts/Lexend/Lexend.ttf', font_size=23,
+    ui_page["Button_1"] = pv.PvButton(container=window, x=564, y=535, width=240,
+        height=55, text='MANUAL', font='assets/fonts/Lexend/Lexend.ttf', font_size=20,
         font_color=(195, 187, 224, 1), font_color_hover=None, bold=False, italic=False,
         underline=False, strikethrough=False, idle_color=(255, 255, 255, 1), hover_color=None,
         clicked_color=None, border_color=(195, 187, 224, 1), border_hover_color=None, border_thickness=1,
@@ -37,8 +37,8 @@ def create_page_1_ui(window,ui):
         on_hover=None, on_click=None, on_release=None, is_visible=True,
         opacity=1, tag=None)
 
-    ui_page["Button_3"] = pv.PvButton(container=window, x=178, y=505, width=292,
-        height=75, text='AUTOMATICO', font='assets/fonts/Lexend/Lexend.ttf', font_size=23,
+    ui_page["Button_3"] = pv.PvButton(container=window, x=220, y=535, width=240,
+        height=55, text='AUTOMATICO', font='assets/fonts/Lexend/Lexend.ttf', font_size=20,
         font_color=(195, 187, 224, 1), font_color_hover=None, bold=False, italic=False,
         underline=False, strikethrough=False, idle_color=(255, 255, 255, 1), hover_color=None,
         clicked_color=None, border_color=(195, 187, 224, 1), border_hover_color=None, border_thickness=1,
@@ -48,12 +48,17 @@ def create_page_1_ui(window,ui):
         is_disabled=False, opacity=1, on_hover=None, on_click=None,
         on_release=None, tag=None)
 
-    ui_page["Webcam_4"] = pv.PvWebcam(container=window, x=40, y=108, width=944,
-        height=377, scale=1, corner_radius=14, auto_start=True,
+    ui_page["Webcam_4"] = pv.PvWebcam(container=window, x=112, y=80, width=800,
+        height=450, scale=1, corner_radius=14, auto_start=False,
         flip_v=False, flip_h=False, rotate=0, border_color=(0, 0, 0, 1),
         border_hover_color=None, border_thickness=2, border_style="solid", is_visible=True,
         opacity=1, webcam_id=0, on_hover=None, on_click=None,
         on_release=None, tag=None)
+
+    # Bloquear el tamano para que el stream no lo reduzca al iniciar.
+    ui_page["Webcam_4"].setMinimumSize(800, 450)
+    ui_page["Webcam_4"].setMaximumSize(800, 450)
+    ui_page["Webcam_4"].setFixedSize(800, 450)
 
     # Botón de PAUSA (solo visible en modo automático)
     ui_page["ButtonPausa"] = pv.PvButton(container=window, x=862, y=20, width=120,
