@@ -29,12 +29,12 @@ def registrar_log(mensaje):
     """Registra mensajes en archivo de log con timestamp"""
     try:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        linea = f"[{timestamp}] {mensaje}\n"
+        linea = f"[{timestamp}] {mensaje}"
         with open(LOG_FILE, 'a', encoding='utf-8') as f:
-            f.write(linea)
-        print(linea.strip())  # También imprimir en consola
+            f.write(linea + "\n")
+        print(linea, flush=True)  # También imprimir en consola con flush
     except Exception as e:
-        print(f"Error escribiendo log: {e}")
+        print(f"Error escribiendo log: {e}", flush=True)
 
 
 @app.route('/gps', methods=['POST'])
@@ -52,15 +52,43 @@ def recibir_gps():
         JSON con estado de la operación
     """
     try:
+        # LOGGING DE DEBUG: Mostrar todo lo que llega
+        registrar_log(f"📥 POST /gps - Nueva petición recibida")
+        registrar_log(f"   Content-Type: {request.content_type}")
+        registrar_log(f"   Body RAW: {request.data.decode('utf-8', errors='replace')[:500]}")
+        
         # Obtener datos del request
-        data = request.get_json()
+        data = request.get_json(force=True, silent=True)
         
         if data is None:
-            registrar_log(f"❌ POST /gps - Sin body JSON")
-            return jsonify({
-                'error': 'No JSON body provided',
-                'status': 'error'
-            }), 400
+            registrar_log(f"⚠️  POST /gps - No es JSON, intentando parsear como texto plano...")
+            # Intentar obtener como texto con formato "lat,lon"
+            texto = request.data.decode('utf-8', errors='replace').strip()
+            registrar_log(f"   Texto recibido: {texto}")
+            
+            # Parsear formato "latitud,longitud" (como envía Tasker)
+            try:
+                partes = texto.split(',')
+                if len(partes) == 2:
+                    lat = float(partes[0].strip())
+                    lon = float(partes[1].strip())
+                    registrar_log(f"   ✅ Parseado correctamente: lat={lat}, lon={lon}")
+                    # Continuar con validación normal
+                    data = {'lat': lat, 'lon': lon}
+                else:
+                    registrar_log(f"   ❌ Formato inválido: esperaba 'lat,lon', recibió {len(partes)} partes")
+                    return jsonify({
+                        'error': 'Invalid format. Expected "lat,lon" or JSON {"lat":X,"lon":Y}',
+                        'received': texto[:200],
+                        'status': 'error'
+                    }), 400
+            except (ValueError, IndexError) as e:
+                registrar_log(f"   ❌ Error parseando coordenadas: {e}")
+                return jsonify({
+                    'error': 'Invalid coordinate format',
+                    'received': texto[:200],
+                    'status': 'error'
+                }), 400
         
         # Validar que existan lat y lon
         lat = data.get('lat')
@@ -126,6 +154,11 @@ def update_gps_get():
     Uso: /update_gps?lat=38.635896&lon=-2.915610
     """
     try:
+        # LOGGING DE DEBUG: Mostrar petición GET
+        registrar_log(f"📥 GET /update_gps - Nueva petición recibida")
+        registrar_log(f"   URL completa: {request.url}")
+        registrar_log(f"   Parámetros: {dict(request.args)}")
+        
         # Obtener parámetros de la URL
         lat = request.args.get('lat')
         lon = request.args.get('lon')
