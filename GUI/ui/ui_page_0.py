@@ -72,6 +72,19 @@ def create_page_0_ui(window,ui):
         strikethrough=False, h_align='right', v_align='top', is_visible=True,
         opacity=1, tag=None)
 
+    # Indicador visual de conectividad para mapas (icono WiFi dinámico)
+    ui_page["IconWifiEstado"] = pv.PvText(container=window, x=20, y=12, width=52,
+        height=44, text='📶', font='assets/fonts/Poppins/Poppins.ttf', font_size=30,
+        font_color=(180, 120, 0, 1), bold=True, italic=False, underline=False,
+        strikethrough=False, h_align='left', v_align='center', is_visible=True,
+        opacity=1, tag=None)
+
+    ui_page["TextEstadoMapa"] = pv.PvText(container=window, x=70, y=20, width=230,
+        height=30, text='COMPROBANDO...', font='assets/fonts/Poppins/Poppins.ttf', font_size=16,
+        font_color=(180, 120, 0, 1), bold=True, italic=False, underline=False,
+        strikethrough=False, h_align='left', v_align='top', is_visible=True,
+        opacity=1, tag=None)
+
     ui_page["Image_6"] = pv.PvImage(container=window, x=364, y=18, image_path='assets/images/93916a4476.png',
         scale=0.634, corner_radius=0, flip_v=False, flip_h=False,
         rotate=0, border_color=None, border_hover_color=None, on_hover=None,
