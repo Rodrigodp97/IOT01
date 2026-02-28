@@ -8,6 +8,7 @@ import platform
 import sys
 import os
 import json
+import socket
 from pathlib import Path
 
 # Importar módulo de mapas y forzar recarga
@@ -15,6 +16,14 @@ import importlib
 import mapa_manager
 importlib.reload(mapa_manager)  # Forzar recarga del módulo
 from mapa_manager import abrir_mapa
+
+# Importar servidor GPS WiFi
+try:
+    from servidor_gps_wifi import iniciar_servidor_thread
+    SERVIDOR_GPS_DISPONIBLE = True
+except ImportError:
+    print("⚠ Advertencia: servidor_gps_wifi no disponible (Flask podría no estar instalado)")
+    SERVIDOR_GPS_DISPONIBLE = False
 
 # Forzar salida inmediata de prints
 sys.stdout.flush()
@@ -34,6 +43,11 @@ retraso_deteccion = 0
 tiempo_medidas = 0
 distancia_deteccion = 0
 
+# Servidor GPS WiFi (recibe ubicación desde Android vía HTTP)
+servidor_gps_thread = None
+servidor_gps_activo = False
+PUERTO_SERVIDOR_GPS = 5000
+
 # Configuración del puerto serial
 arduino_port = None
 lectura_activa = False
@@ -41,6 +55,10 @@ hilo_lectura = None
 
 # Control de modo GPS activo
 gps_modo_mapas = False  # True cuando GPS está activo solo para visualización en mapas
+
+# Monitor de conectividad para mapas (online/offline)
+monitoreo_red_activo = False
+hilo_monitoreo_red = None
 
 # Trayectoria GPS para visualización en mapa
 # Lista de tuplas (latitud, longitud) que registra el recorrido
@@ -395,6 +413,70 @@ def detener_lectura_sensor():
     global lectura_activa
     lectura_activa = False
     print("Lectura de sensor detenida")
+
+
+def hay_conectividad_tiles(timeout=1.5):
+    """Verifica conectividad al servidor de tiles de mapas."""
+    try:
+        with socket.create_connection(("mt0.google.com", 443), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def actualizar_estado_red_ui(ui, online):
+    """Actualiza el indicador visual ONLINE/OFFLINE en la pantalla de inicio."""
+    try:
+        if "page_0" in ui and "TextEstadoMapa" in ui["page_0"]:
+            if online:
+                ui["page_0"]["TextEstadoMapa"].text = "ONLINE"
+                ui["page_0"]["TextEstadoMapa"].font_color = (0, 150, 0, 1)
+                if "IconWifiEstado" in ui["page_0"]:
+                    ui["page_0"]["IconWifiEstado"].text = "📶"
+                    ui["page_0"]["IconWifiEstado"].font_color = (0, 150, 0, 1)
+            else:
+                ui["page_0"]["TextEstadoMapa"].text = "OFFLINE"
+                ui["page_0"]["TextEstadoMapa"].font_color = (180, 0, 0, 1)
+                if "IconWifiEstado" in ui["page_0"]:
+                    ui["page_0"]["IconWifiEstado"].text = "📵"
+                    ui["page_0"]["IconWifiEstado"].font_color = (180, 0, 0, 1)
+    except Exception:
+        pass
+
+
+def monitor_conectividad_mapa(ui):
+    """Monitorea conectividad de mapas y refresca estado visual cada pocos segundos."""
+    global monitoreo_red_activo
+    estado_anterior = None
+
+    while monitoreo_red_activo:
+        online = hay_conectividad_tiles(timeout=1.5)
+
+        if estado_anterior is None or online != estado_anterior:
+            actualizar_estado_red_ui(ui, online)
+            estado_anterior = online
+
+        time.sleep(3)
+
+
+def iniciar_monitor_conectividad(ui):
+    """Inicia hilo daemon para monitor de conectividad online/offline."""
+    global monitoreo_red_activo, hilo_monitoreo_red
+
+    if monitoreo_red_activo:
+        return
+
+    monitoreo_red_activo = True
+    hilo_monitoreo_red = threading.Thread(target=monitor_conectividad_mapa, args=(ui,), daemon=True)
+    hilo_monitoreo_red.start()
+    print("Monitor de conectividad de mapas iniciado")
+
+
+def detener_monitor_conectividad():
+    """Detiene monitor de conectividad de mapas."""
+    global monitoreo_red_activo
+    monitoreo_red_activo = False
+    print("Monitor de conectividad de mapas detenido")
 
 def configurar_webcam_ajuste(ui):
     """
@@ -798,6 +880,50 @@ def attach_events(ui):
     ui["page_2"]["Button_5"].on_click = guardar_configuracion
 
 # ===================================================
+# ========= 2. SERVIDOR GPS WiFi ==================
+# ===================================================
+
+def iniciar_servidor_gps():
+    """Inicia el servidor Flask para recibir GPS desde Android"""
+    global servidor_gps_thread, servidor_gps_activo
+    
+    if not SERVIDOR_GPS_DISPONIBLE:
+        print("⚠ Servidor GPS WiFi no disponible (instala Flask)")
+        return False
+    
+    if servidor_gps_activo:
+        print("⚠ Servidor GPS WiFi ya está en ejecución")
+        return False
+    
+    try:
+        print("\n🚀 Iniciando Servidor GPS WiFi...")
+        servidor_gps_thread = iniciar_servidor_thread(puerto=PUERTO_SERVIDOR_GPS)
+        servidor_gps_activo = True
+        print(f"✅ Servidor GPS WiFi iniciado en puerto {PUERTO_SERVIDOR_GPS}")
+        print(f"   Endpoint: POST http://<IP_RASPBERRY>:{PUERTO_SERVIDOR_GPS}/gps")
+        print(f"   Esperando datos de Tasker en Android...\n")
+        return True
+    except Exception as e:
+        print(f"❌ Error iniciando Servidor GPS WiFi: {e}")
+        servidor_gps_activo = False
+        return False
+
+def detener_servidor_gps():
+    """Detiene el servidor Flask (nota: Flask corre en daemon thread)"""
+    global servidor_gps_activo
+    
+    if not servidor_gps_activo:
+        return
+    
+    try:
+        print("\n🛑 Deteniendo Servidor GPS WiFi...")
+        servidor_gps_activo = False
+        # Nota: Flask corre en thread daemon, se cerrará cuando termina la app
+        print("✓ Servidor GPS WiFi detenido\n")
+    except Exception as e:
+        print(f"⚠ Error deteniendo Servidor GPS WiFi: {e}")
+
+# ===================================================
 # ============== 3. MAIN FUNCTION ==================
 # ===================================================
 
@@ -861,6 +987,9 @@ def main():
     # Iniciar hilo de lectura serial desde el inicio
     print("[4] Iniciando lectura del puerto serial...", flush=True)
     iniciar_lectura_sensor(ui)
+
+    # Iniciar monitor visual online/offline para mapas
+    iniciar_monitor_conectividad(ui)
     
     # Solicitar información inicial del Arduino
     if arduino_port and arduino_port.is_open:
@@ -876,13 +1005,18 @@ def main():
         time.sleep(1)  # Esperar a que lleguen los valores
         print(f"[6] Valores recibidos - Retraso: {retraso_deteccion}, Tiempo: {tiempo_medidas}, Distancia: {distancia_deteccion}", flush=True)
     
-    print("[7] Mostrando ventana...", flush=True)
+    # Iniciar servidor GPS WiFi
+    print("[7] Iniciando servidor GPS WiFi...", flush=True)
+    iniciar_servidor_gps()
+    print("[8] Mostrando ventana...", flush=True)
     print("=" * 50, flush=True)
     ui["window"].show()
     app.run()
     
     # Detener lectura y cerrar puerto serial al salir
     detener_lectura_sensor()
+    detener_monitor_conectividad()
+    detener_servidor_gps()
     if arduino_port and arduino_port.is_open:
         arduino_port.close()
         print("Conexión con Arduino cerrada")

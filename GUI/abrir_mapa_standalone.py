@@ -8,6 +8,7 @@ import tkintermapview
 from pathlib import Path
 import json
 import math
+import socket
 
 # Configuraciones de mapas
 MAPAS = {
@@ -60,6 +61,14 @@ class VentanaMapa:
         self.gps_file = Path(__file__).parent / "gps_actual.json"
         self.fumigacion_file = Path(__file__).parent / "fumigacion_trayectoria.json"
         self.zonas_fumigadas = []  # Lista de polígonos de zonas fumigadas
+
+    def _hay_conectividad_tiles(self, timeout=1.5):
+        """Verificar conectividad básica al servidor de tiles."""
+        try:
+            with socket.create_connection(("mt0.google.com", 443), timeout=timeout):
+                return True
+        except OSError:
+            return False
         
     def abrir(self):
         # Crear ventana
@@ -67,17 +76,24 @@ class VentanaMapa:
         self.root.title(self.titulo)
         self.root.geometry("1024x600")
         
-        # Configurar base de datos offline
+        # Configurar modo de mapa (online/offline)
         db_path = Path(__file__).parent / "offline_map.db"
-        use_offline = db_path.exists()
-        
-        if use_offline:
+        tiene_db_offline = db_path.exists()
+        online_disponible = self._hay_conectividad_tiles(timeout=1.5)
+        use_offline = tiene_db_offline and not online_disponible
+
+        if online_disponible:
+            print("✓ Modo ONLINE activado")
+            if tiene_db_offline:
+                print(f"  Base offline disponible como respaldo: {db_path}")
+        elif use_offline:
             print(f"✓ Modo OFFLINE activado")
             print(f"  Base de datos: {db_path}")
             print(f"  Tamaño: {db_path.stat().st_size / 1024 / 1024:.2f} MB")
         else:
-            print(f"⚠ Modo ONLINE - Base de datos no encontrada: {db_path}")
-            print(f"  Ejecuta 'migrar_tiles.py' primero para modo offline")
+            print("⚠ Sin conectividad al servidor de tiles y sin base offline")
+            print(f"  Base no encontrada: {db_path}")
+            print("  El mapa puede abrir, pero sin tiles visibles hasta recuperar conexión")
         
         # Crear widget de mapa con configuración offline
         # Zoom máximo limitado a 19 (máximo nivel descargado en tiles offline)
